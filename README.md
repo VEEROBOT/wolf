@@ -30,7 +30,7 @@
    - Install the ROS Navigation stack package along with other dependencies using the following command:
 
       ```bash
-      sudo apt install ros-humble-navigation2 ros-humble-nav2-bringup ros-humble-xacro  ros-humble-rviz2 ros-humble-tf-transformations
+      sudo apt install ros-humble-navigation2 ros-humble-nav2-bringup ros-humble-xacro  ros-humble-rviz2 ros-humble-tf-transformations ros-humble-rplidar-ros ros-humble-librealsense2* ros-humble-realsense2-*
       ```
 
 ## Micro_ROS Setup
