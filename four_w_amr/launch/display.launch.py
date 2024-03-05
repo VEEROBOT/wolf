@@ -2,21 +2,29 @@
 
 import os
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, LogInfo
+from launch.actions import DeclareLaunchArgument, LogInfo ,IncludeLaunchDescription
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 from launch.substitutions import  LaunchConfiguration, PythonExpression
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 
 
 def generate_launch_description():
 
     # Constants for paths to different files and folders
     package_name = 'four_w_amr'
+    package_joy = 'teleop_twist_joy'
+
     rviz_config_file_path = 'config/rviz.rviz'
     urdf_file_path = 'urdf/four_w_amr.urdf'
+    joy_file_path = 'launch/teleop-launch.py'
 
     # Set the path to different files and folders.
     pkg_share = FindPackageShare(package=package_name).find(package_name)
+
+    pkg_share_joy = FindPackageShare(package=package_joy).find(package_joy)
+    joy_path = os.path.join(pkg_share_joy, joy_file_path)
+
     default_urdf_model_path = os.path.join(pkg_share, urdf_file_path)
     default_rviz_config_path = os.path.join(pkg_share, rviz_config_file_path)
 
@@ -74,7 +82,14 @@ def generate_launch_description():
         name='rviz2',
         output='screen',
         arguments=['-d', LaunchConfiguration('rviz_config_file')])
-    
+    static_transform_publisher_cmd_1 = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        name='static_transform_publisher',
+        output='screen',
+        arguments=['0.0', '0', '0.01', '1.57', '0', '0.0', 'base_link', 'imu_link_1'])
+
+
     static_transform_publisher_cmd = Node(
     package='tf2_ros',
     executable='static_transform_publisher',
@@ -82,7 +97,16 @@ def generate_launch_description():
     output='screen',
     arguments=['0.0', '0', '0.0', '0', '0', '0', 'map', 'odom'])
 
+    static_transform_publisher_cmd_2 = Node(
+    package='tf2_ros',
+    executable='static_transform_publisher',
+    name='static_transform_publisher',
+    output='screen',
+    arguments=['-0.09', '0', '0.15', '0', '0', '0', 'top_plate_link', 'camera_link'])
 
+    included_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([joy_path])
+    )
     # Create the launch description and populate
     ld = LaunchDescription()
 
@@ -100,6 +124,10 @@ def generate_launch_description():
 
     # Launch RViz
     ld.add_action(start_rviz_cmd)
-    # ld.add_action(static_transform_publisher_cmd)
+    ld.add_action(static_transform_publisher_cmd_1)
+    ld.add_action(static_transform_publisher_cmd)
+    ld.add_action(static_transform_publisher_cmd_2)
+    ld.add_action(included_launch)
+
 
     return ld

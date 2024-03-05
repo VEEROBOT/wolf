@@ -1,4 +1,4 @@
-//   WORKING motor control with IMU MPU6050
+//    Main Motor controller
 
 #include <Arduino.h>
 #include <Adafruit_MotorShield.h>
@@ -12,12 +12,8 @@
 #include <WiFi.h>
 #include "soc/rtc_io_reg.h"
 #include <std_msgs/msg/string.h>
-#include <Adafruit_MPU6050.h>
-#include <Adafruit_Sensor.h>
-#include <sensor_msgs/msg/imu.h>
-#include <rosidl_runtime_c/string_functions.h>
-#include <rosidl_runtime_c/string.h>
-#include <rclc/timer.h>
+#include <rcl_interfaces/msg/log.h>
+
 
 
 int16_t received_pwml_data = 0; // Global variable to store received pwml data
@@ -30,11 +26,13 @@ rcl_node_t node;
 rcl_subscription_t pwml_subscription;
 rcl_subscription_t pwmr_subscription;
 rcl_publisher_t encoder_data__publisher;
-rcl_publisher_t imu_data__publisher;
-
 std_msgs__msg__Int32MultiArray encoder_msg;
-sensor_msgs__msg__Imu imu_msg;
+rcl_interfaces__msg__Log msgLog;
 
+
+rcl_publisher_t motor_data_publisher;
+rcl_publisher_t publisher_log;
+std_msgs__msg__String motor_data_msg;
 
 int32_t encoderdata[5];  
 
@@ -70,6 +68,7 @@ volatile long lastEncoderValue1 = 0;
 volatile long lastEncoderValue2 = 0;
 volatile long lastEncoderValue3 = 0;
 volatile long lastEncoderValue4 = 0;
+const int BUILTIN_LED=2;
 
 
 
@@ -113,16 +112,6 @@ Adafruit_MotorShield AFMS = Adafruit_MotorShield(0x40);
 #define BACKRIGHT 2
 #define BACKLEFT 3
 
-#define SDA_1 21
-#define SCL_1 22
-
-#define SDA_2 33
-#define SCL_2 32
-
-TwoWire I2C_1 =TwoWire(0);
-TwoWire I2C_2 =TwoWire(1);
-
-
 #define EXECUTE_EVERY_N_MS(MS, X)      \
   do                                   \
   {                                    \
@@ -143,10 +132,6 @@ Adafruit_DCMotor *backLeftMotor = AFMS.getMotor(2);
 Adafruit_DCMotor *backRightMotor = AFMS.getMotor(3);
 Adafruit_DCMotor *frontRightMotor = AFMS.getMotor(4);
 
-
-Adafruit_MPU6050 mpu;
-
-
 void initMotorController()
 {
   if (IFDAC_ENABLED)
@@ -155,13 +140,7 @@ void initMotorController()
     // ...
   }
 
-  AFMS.begin(0x1E,&I2C_2); // create with the default frequency 1.6KHz
-  AFMS.begin(0x40,&I2C_2); // create with the default frequency 1.6KHz
-  AFMS.begin(0x70,&I2C_2); // create with the default frequency 1.6KHz
-  AFMS.begin(0x7E,&I2C_2); // create with the default frequency 1.6KHz
-  AFMS.begin(0x6A,&I2C_2); // create with the default frequency 1.6KHz
-  
-
+  AFMS.begin(); // create with the default frequency 1.6KHz
 
   pinMode(HALLSEN_A, INPUT);
   pinMode(HALLSEN_B, INPUT);
@@ -259,34 +238,34 @@ void updateEncoder1() {
 
 
   if (digitalRead(HALLSEN_A) == digitalRead(HALLSEN_B)) {
-    encoderValue1--;
-  } else {
     encoderValue1++;
+  } else {
+    encoderValue1--;
   }
 }
 
 void updateEncoder2() {
 
   if (digitalRead(HALLSEN_A2) == digitalRead(HALLSEN_B2)) {
-    encoderValue2++;
-  } else {
     encoderValue2--;
+  } else {
+    encoderValue2++;
   }
 }
 
 void updateEncoder3() {
   if (digitalRead(HALLSEN_A3) == digitalRead(HALLSEN_B3)) {
-    encoderValue3++;
-  } else {
     encoderValue3--;
+  } else {
+    encoderValue3++;
   }
 }
 
 void updateEncoder4() {
   if (digitalRead(HALLSEN_A4) == digitalRead(HALLSEN_B4)) {
-    encoderValue4++;
-  } else {
     encoderValue4--;
+  } else {
+    encoderValue4++;
   }
 }
 
@@ -299,14 +278,13 @@ float pid(int desire, int actual, float min_val_, float max_val_)
     static double error =0;  
 
     static double integral_ = 0; // Make it static to preserve its value between function calls
-    static double prev_derivative_ =0;
     static double prev_error_ = 0; // Make it static to preserve its value between function calls
-    double tolerance_1 = 0.5; 
+    double tolerance_1 = 0.1; 
+    static double prev_derivative_ =0;
+
 
 
     error = desire - actual;
-
-
 //    TO IMPLEMENT iNTIGRAL AT STOP ONLY
 
       // if (fabs(fabs(error) - fabs(prev_error_)) <= tolerance_1*fabs(desire) && error !=0.0 ) {
@@ -332,23 +310,18 @@ float pid(int desire, int actual, float min_val_, float max_val_)
         integral_ = min_val_;
 
     double derivative_ = error - prev_error_;
-
     derivative_ = 0.2 * derivative_ + 0.8 * prev_derivative_;
 
-
-    if (desire == 0 )
+    if (desire == 0 && error == 0)
     {
         integral_ = 0;
         derivative_ = 0;
         prev_derivative_ = 0;
 
-        
     }
 
     double pid = (kp * error) + (ki * integral_) + (kd * derivative_);
     prev_error_ = error;
-    prev_derivative_ = derivative_;
-
     
 
     return constrain(pid, min_val_, max_val_);
@@ -373,7 +346,6 @@ void destroy_entities()
   (void)rmw_uros_set_context_entity_destroy_session_timeout(rmw_context, 0);
 
   rcl_publisher_fini(&encoder_data__publisher, &node);
-  rcl_publisher_fini(&imu_data__publisher, &node);
   rclc_executor_fini(&executor);
   rcl_node_fini(&node);
   rclc_support_fini(&support);
@@ -411,13 +383,6 @@ bool create_entities()
       ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Int32MultiArray),
       "/encoderdata");
 
-  rclc_publisher_init_default(
-      &imu_data__publisher,
-      &node,
-      ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Imu),
-      "/imu/data_raw");
-
-
   rclc_executor_add_subscription(
       &executor,
       &pwml_subscription,
@@ -431,6 +396,7 @@ bool create_entities()
       &received_pwmr_data,
       &pwmr_callback,
       ON_NEW_DATA);
+
   return true;
 }
 
@@ -450,11 +416,10 @@ void setup()
   IPAddress agent_ip(192, 168, 250, 151);
   size_t agent_port = 8888;
   
+  RCUTILS_LOG_INFO("micro_ros_example", "This is an informational message.");
 
   Serial.begin(115200);
-  pinMode(2, OUTPUT);
-
-
+  pinMode(BUILTIN_LED, OUTPUT);
   //         TO ENABLE SERIAL
 
   set_microros_serial_transports(Serial);
@@ -476,68 +441,27 @@ void setup()
 
   state = WAITING_AGENT;
 
-  I2C_1.begin(SDA_1,SCL_1);
-  I2C_2.begin(SDA_2,SCL_2);
+  Wire.begin(33, 32);
 
   encoderValue1 = 0;
   encoderValue2 = 0;
   encoderValue3 = 0;
   encoderValue4 = 0;
-
   encoder_msg.data.data = encoderdata;
-  encoder_msg.data.size = 4;  
+  encoder_msg.data.size = 5;  
 
-  if (!mpu.begin(0x68,&I2C_1)) {
-    Serial.println("Failed to find MPU6050 chip");
-    while (1) {
-      delay(10);
-    }
-  }
-  else{
-  Serial.println("MPU6050 Found!");
-  }
-  mpu.setHighPassFilter(MPU6050_HIGHPASS_1_25_HZ);
-  mpu.setMotionDetectionThreshold(10);
-  mpu.setMotionDetectionDuration(20);
-  // mpu.setAccelerometerRange(MPU6050_RANGE_16_G);
-  // mpu.setGyroRange(MPU6050_RANGE_250_DEG);
-
-  mpu.setInterruptPinLatch(true);	// Keep it latched.  Will turn off when reinitialized.
-  mpu.setInterruptPinPolarity(true);
-  mpu.setMotionInterrupt(true);
-  
   initMotorController();
   EncoderInit();
-
 }
 
 
 void loop()
 { 
-    unsigned long currentTime = millis();
+
+
+  Serial.println(state);
+  unsigned long currentTime = millis();
   unsigned long elapsedTime = currentTime - lastUpdateTime;
-
-    sensors_event_t a, g, temp;
-    mpu.getEvent(&a, &g, &temp);
-    uint32_t sec = currentTime / 1000;
-    uint32_t nsec = (currentTime % 1000) * 1000000;
-
-    imu_msg.header.stamp.sec = sec;
-    imu_msg.header.stamp.nanosec = nsec;
-    imu_msg.header.frame_id.data = "imu_link";
-
-    imu_msg.linear_acceleration.x = map(a.acceleration.x,-11.7,11.7,-10.0,10.0);
-    imu_msg.linear_acceleration.y =map(a.acceleration.y,-11.7,11.7,-10.0,10.0);
-    imu_msg.linear_acceleration.z = 9.8;
-    // imu_msg.linear_acceleration.z = a.acceleration.z;
-
-  imu_msg.angular_velocity.x = round(g.gyro.x * 10) / 10.0;
-  imu_msg.angular_velocity.y = round(g.gyro.y * 10) / 10.0;
-  imu_msg.angular_velocity.z = round(g.gyro.z * 10) / 10.0;
-
-    rcl_publish(&imu_data__publisher, &imu_msg, NULL);
-
-
 
 
 
@@ -547,10 +471,10 @@ void loop()
     float timeInSeconds = elapsedTime / 1000.0; // Convert time to seconds
 
     // Calculate RPM for each motor based on the change in encoder values
-    rpm1 = (encoderValue1 - lastEncoderValue1) * 60 / (ticks_per_rev * timeInSeconds);  // RIGHT FRONT
-    rpm2 = (encoderValue2 - lastEncoderValue2) * 60 / (ticks_per_rev * timeInSeconds);  // LEFT BACK
-    rpm3 = (encoderValue3 - lastEncoderValue3) * 60 / (ticks_per_rev * timeInSeconds);  // LEFT FRONT
-    rpm4 = (encoderValue4 - lastEncoderValue4) * 60 / (ticks_per_rev * timeInSeconds);  // RIGHT BACK
+    rpm1 = (encoderValue1 - lastEncoderValue1) * 60 / (ticks_per_rev * timeInSeconds);  // LEFT BACK
+    rpm2 = (encoderValue2 - lastEncoderValue2) * 60 / (ticks_per_rev * timeInSeconds);  // RIGHT FRONT
+    rpm3 = (encoderValue3 - lastEncoderValue3) * 60 / (ticks_per_rev * timeInSeconds);  // RIGHT BACK
+    rpm4 = (encoderValue4 - lastEncoderValue4) * 60 / (ticks_per_rev * timeInSeconds);  // LEFT FRONT
 
     // Update last encoder values for the next calculation
     lastEncoderValue1 = encoderValue1;
@@ -559,17 +483,6 @@ void loop()
     lastEncoderValue4 = encoderValue4;
 
     lastUpdateTime = currentTime;
-  }
-  encoderdata[0]=encoderValue1;
-  encoderdata[1]=encoderValue2;
-  encoderdata[2]=encoderValue3;
-  encoderdata[3]=encoderValue4;
-
-  encoder_msg.data.data = encoderdata;
-  rcl_ret_t publish_status = rcl_publish(&encoder_data__publisher, &encoder_msg, NULL);
-  if (publish_status != RCL_RET_OK)
-  {
-
   }
 
 
@@ -584,22 +497,26 @@ void loop()
     state = (true == create_entities()) ? AGENT_CONNECTED : WAITING_AGENT;
     if (state == WAITING_AGENT)
     {
+
       destroy_entities();
     };
     break;
   case AGENT_CONNECTED:
-    EXECUTE_EVERY_N_MS(1000, state = (RMW_RET_OK == rmw_uros_ping_agent(500, 2)) ? AGENT_CONNECTED : AGENT_DISCONNECTED;);
+    EXECUTE_EVERY_N_MS(500, state = (RMW_RET_OK == rmw_uros_ping_agent(100, 1)) ? AGENT_CONNECTED : AGENT_DISCONNECTED;);
     if (state == AGENT_CONNECTED)
     {
       Serial.println("CONNECTION ESTABLISHED");
     }
     break;
 
-  case AGENT_DISCONNECTED:  
-    break;
+  case AGENT_DISCONNECTED:
 
+    break;
   default:
     setMotorSpeeds(0, 0, 0, 0);
+
+    // ESP.restart();
+
     break;
   }
 
@@ -608,6 +525,13 @@ void loop()
 
   int desiredRPM_L = pwmToRPM(received_pwml_data, PWM_MIN, PWM_MAX, RPM_MIN, RPM_MAX);
   int desiredRPM_R = pwmToRPM(received_pwmr_data, PWM_MIN, PWM_MAX, RPM_MIN, RPM_MAX);
+
+
+  encoderdata[0]=encoderValue1;
+  encoderdata[1]=encoderValue2;
+  encoderdata[2]=encoderValue3;
+  encoderdata[3]=encoderValue4;
+
 
   // ----------PID-Controller------------//
 
@@ -619,48 +543,34 @@ void loop()
   // -------------------------//
 
 
-    if (state == WAITING_AGENT)
-  {
-    digitalWrite(2, HIGH);
-    delay(10);
-    digitalWrite(2, LOW);
-
-  }
-
+  
   if (state == AGENT_CONNECTED)
   {
-    digitalWrite(2, LOW);
-    
+  digitalWrite(2, LOW);   // Turn the LED on (Note that LOW is the voltage level
+
     rclc_executor_spin_some(&executor, RCL_MS_TO_NS(100));
 
     setMotorSpeeds(received_pwmr_data+error1, received_pwml_data+error2, received_pwmr_data+error3, received_pwml_data+error4);
-    if (state = (RMW_RET_OK == rmw_uros_ping_agent(500, 2)) ? AGENT_CONNECTED : AGENT_DISCONNECTED);{
 
-    }
   }
 
+  else if(state == AGENT_DISCONNECTED){
 
-  if(state == AGENT_DISCONNECTED){
-    digitalWrite(2, HIGH);   
+  digitalWrite(2, HIGH);   // Turn the LED on (Note that LOW is the voltage level
+
 
     setMotorSpeeds(0, 0, 0, 0);
     memset(encoderdata, 0, sizeof(encoderdata));
     encoderValue1 = 0;
     encoderValue2 = 0;
     encoderValue3 = 0;
-    encoderValue4 = 0;
-    a.acceleration.x= 0.0;
-    a.acceleration.y= 0.0;
-    a.acceleration.z= 0.0;
-
-    g.gyro.x= 0.0;
-    g.gyro.y= 0.0;
-    g.gyro.z= 0.0;
+    encoderValue4 = 0;    
 
     delay(200);   
     ESP.restart();
     
   }
+
   else
   {
     Serial.println("END");
