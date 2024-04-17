@@ -88,14 +88,19 @@ def generate_launch_description():
         name='static_transform_publisher',
         output='screen',
         arguments=['0.0', '0', '0.01', '1.57', '0', '0.0', 'base_link', 'imu_link_1'])
-
+    static_transform_publisher_cmd_0 = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        name='static_transform_publisher',
+        output='screen',
+        arguments=['0.0', '0', '0.01', '1.57', '0', '0.0', 'base_link', 'map'])
 
     static_transform_publisher_cmd = Node(
     package='tf2_ros',
     executable='static_transform_publisher',
     name='static_transform_publisher',
     output='screen',
-    arguments=['0.0', '0', '0.0', '0', '0', '0', 'map', 'odom'])
+    arguments=['0.0', '0', '0.0', '0', '0', '0', 'map', 'odom']) 
 
     static_transform_publisher_cmd_2 = Node(
     package='tf2_ros',
@@ -103,6 +108,13 @@ def generate_launch_description():
     name='static_transform_publisher',
     output='screen',
     arguments=['-0.09', '0', '0.15', '0', '0', '0', 'top_plate_link', 'camera_link'])
+    
+    static_transform_publisher_cmd_3 = Node(
+    package='tf2_ros',
+    executable='static_transform_publisher',
+    name='static_transform_publisher',
+    output='screen',
+    arguments=['0.0', '0', '0.0', '0', '0', '0', 'map', 'scan'])
 
     included_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([joy_path])
@@ -125,8 +137,10 @@ def generate_launch_description():
     # Launch RViz
     ld.add_action(start_rviz_cmd)
     ld.add_action(static_transform_publisher_cmd_1)
+    ld.add_action(static_transform_publisher_cmd_0)
     ld.add_action(static_transform_publisher_cmd)
     ld.add_action(static_transform_publisher_cmd_2)
+    ld.add_action(static_transform_publisher_cmd_3)
     ld.add_action(included_launch)
 
 
