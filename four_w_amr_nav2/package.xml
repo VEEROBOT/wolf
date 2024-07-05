@@ -4,7 +4,7 @@
   <name>four_w_amr_nav2</name>
   <version>0.0.0</version>
   <description>TODO: Package description</description>
-  <maintainer email="helpdesk8@e-yantra.org">ravi</maintainer>
+  <maintainer email="pravi.khm@gmail.com">Pravi</maintainer>
   <license>TODO: License declaration</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
