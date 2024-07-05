@@ -103,8 +103,8 @@ float ki =0.18;
 
 //   ##################################################################
 
-char ssid[] = "lg";
-char psk[] = "krrish2002";
+char ssid[] = "siliris";
+char psk[] = "siliris";
 Adafruit_MotorShield AFMS = Adafruit_MotorShield(0x40);
 
 #define IFDAC_ENABLED 1
